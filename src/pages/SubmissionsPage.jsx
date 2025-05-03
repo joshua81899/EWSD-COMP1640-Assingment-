@@ -6,10 +6,10 @@ import ContentCard from '../components/ContentCard';
 import FormComponent from '../components/FormComponent';
 import axios from 'axios';
 
-const StudentDashboardPage = () => {
+const SubmissionsPage = ({ isAuthenticated, currentUser }) => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(currentUser); // Use currentUser passed from ProtectedRoute
   const [activeTab, setActiveTab] = useState('overview');
   const [lastLogin, setLastLogin] = useState(null);
   const [formError, setFormError] = useState('');
@@ -30,136 +30,110 @@ const StudentDashboardPage = () => {
     'SOCSCI': 'Social Sciences'
   };
   
-  // Load user data from database
+  // Load user data and submissions
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchData = async () => {
       try {
-        // Check if user is logged in
-        const token = localStorage.getItem('token');
-        if (!token) {
-          navigate('/login');
-          return;
-        }
-
-        // Fetch faculties for reference
+        setIsLoading(true);
+        
+        // Fetch faculties for reference (public endpoint)
         try {
-          const facultiesResponse = await axios.get('http://localhost:5001/api/faculties', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
+          const facultiesResponse = await axios.get('http://localhost:5001/api/faculties');
           setFaculties(facultiesResponse.data);
         } catch (error) {
           console.error('Error fetching faculties:', error);
         }
 
-        // Fetch user details from the database
-        const userResponse = await axios.get('http://localhost:5001/api/users/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        // Get user data from response
-        const userData = userResponse.data;
-        
-        // Get faculty name based on faculty_id (now a string like "COMPSCI")
-        let facultyName = "Student";
-        if (userData.faculty_id) {
-          // Try to get from the faculty mapping first
-          facultyName = facultyMapping[userData.faculty_id] || userData.faculty_id;
-          
-          // If we have faculties from API, try to match there as well
-          if (faculties.length > 0) {
-            const faculty = faculties.find(f => f.faculty_id === userData.faculty_id);
-            if (faculty && faculty.faculty_name) {
-              facultyName = faculty.faculty_name;
+        // If authenticated, get user details
+        if (isAuthenticated) {
+          // Get auth token
+          const token = localStorage.getItem('token');
+          if (token) {
+            try {
+              // Fetch user details from the database
+              const userResponse = await axios.get('http://localhost:5001/api/users/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              
+              // Get user data from response
+              const userData = userResponse.data;
+              
+              // Get faculty name based on faculty_id
+              let facultyName = "Student";
+              if (userData.faculty_id) {
+                // Try to get from the faculty mapping first
+                facultyName = facultyMapping[userData.faculty_id] || userData.faculty_id;
+                
+                // If we have faculties from API, try to match there as well
+                if (faculties.length > 0) {
+                  const faculty = faculties.find(f => f.faculty_id === userData.faculty_id);
+                  if (faculty && faculty.faculty_name) {
+                    facultyName = faculty.faculty_name;
+                  }
+                }
+              }
+              
+              // Set user state with the data from database
+              setUser({
+                id: userData.user_id,
+                firstName: userData.first_name,
+                lastName: userData.last_name,
+                email: userData.email,
+                facultyId: userData.faculty_id,
+                faculty: facultyName,
+                role: userData.role_id
+              });
+
+              // Get last login time
+              if (userData.last_login) {
+                setLastLogin(new Date(userData.last_login));
+              } else {
+                // If no last login in database, use current time
+                const lastLoginTime = localStorage.getItem('lastLoginTime');
+                if (lastLoginTime) {
+                  setLastLogin(new Date(lastLoginTime));
+                }
+              }
+            } catch (userError) {
+              console.error('Error fetching user data:', userError);
+              // Non-critical, can continue without user data for public page
             }
           }
         }
         
-        // Set user state with the data from database
-        setUser({
-          id: userData.user_id,
-          firstName: userData.first_name,
-          lastName: userData.last_name,
-          email: userData.email,
-          facultyId: userData.faculty_id,
-          faculty: facultyName,
-          role: userData.role_id
-        });
-
-        // Get last login time
-        if (userData.last_login) {
-          setLastLogin(new Date(userData.last_login));
+        // Fetch submissions with the appropriate endpoint based on authentication
+        let submissionsResponse;
+        
+        // Prepare parameters for filtering
+        const params = {
+          ...(activeTab === 'submissions' && { faculty: '', status: '', academicYear: '' })
+        };
+        
+        if (isAuthenticated) {
+          // Use authenticated endpoint if logged in
+          const token = localStorage.getItem('token');
+          submissionsResponse = await axios.get('http://localhost:5001/api/submissions', {
+            headers: { 'Authorization': `Bearer ${token}` },
+            params
+          });
         } else {
-          // If no last login in database, use current time
-          const lastLoginTime = localStorage.getItem('lastLoginTime');
-          if (lastLoginTime) {
-            setLastLogin(new Date(lastLoginTime));
-          }
+          // Use public endpoint if guest
+          submissionsResponse = await axios.get('http://localhost:5001/api/public/submissions', { params });
         }
-
-        // If it's submissions tab, fetch submissions
-        if (activeTab === 'submissions') {
-          fetchSubmissions(token);
-        }
-
+        
+        setSubmissions(submissionsResponse.data);
         setIsLoading(false);
       } catch (error) {
-        console.error('Error loading user data:', error);
+        console.error('Error loading data:', error);
         
-        // Fallback to localStorage if API fails
-        try {
-          const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-          if (storedUser && storedUser.id) {
-            // Get faculty name if possible
-            let facultyName = "Student";
-            if (storedUser.facultyId && facultyMapping[storedUser.facultyId]) {
-              facultyName = facultyMapping[storedUser.facultyId];
-            } else if (storedUser.faculty) {
-              facultyName = storedUser.faculty;
-            }
-            
-            setUser({
-              id: storedUser.id,
-              firstName: storedUser.firstName,
-              lastName: storedUser.lastName,
-              email: storedUser.email,
-              facultyId: storedUser.facultyId,
-              faculty: facultyName
-            });
-            
-            const lastLoginTime = localStorage.getItem('lastLoginTime');
-            if (lastLoginTime) {
-              setLastLogin(new Date(lastLoginTime));
-            }
-          } else {
-            // If no valid user data, redirect to login
-            navigate('/login');
-            return;
-          }
-        } catch (localStorageError) {
-          console.error('Error reading from localStorage:', localStorageError);
-          navigate('/login');
-          return;
-        }
-        
+        // Set empty submissions but don't redirect to login
+        setSubmissions([]);
         setIsLoading(false);
       }
     };
 
-    fetchUserData();
-  }, [navigate, activeTab]);
-
-  // Fetch user submissions
-  const fetchSubmissions = async (token) => {
-    try {
-      const response = await axios.get('http://localhost:5001/api/submissions', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      setSubmissions(response.data);
-    } catch (error) {
-      console.error('Error fetching submissions:', error);
-      setSubmissions([]);
-    }
-  };
+    fetchData();
+  }, [navigate, activeTab, isAuthenticated, currentUser]);
 
   // FIXED LOGOUT - Completely synchronous, no async/await, uses window.location for hard redirect
   const handleLogout = () => {
@@ -171,9 +145,6 @@ const StudentDashboardPage = () => {
     
     // Use window.location for a hard page refresh/redirect
     window.location.href = '/login';
-    
-    // We don't need to call the logout API - the token is already removed
-    // This ensures we never get stuck on a loading screen
   };
 
   // Handle tab changes
@@ -181,14 +152,6 @@ const StudentDashboardPage = () => {
     setActiveTab(tabId);
     setFormError('');
     setSuccessMessage('');
-    
-    // If switching to submissions tab, fetch submissions
-    if (tabId === 'submissions' && user) {
-      const token = localStorage.getItem('token');
-      if (token) {
-        fetchSubmissions(token);
-      }
-    }
   };
 
   // Submission form fields
@@ -234,60 +197,14 @@ const StudentDashboardPage = () => {
     }
   ];
 
-  // Settings form fields
-  const getSettingsFields = () => [
-    {
-      name: 'firstName',
-      label: 'First Name',
-      type: 'text',
-      placeholder: 'Your first name',
-      value: user?.firstName || '',
-      required: true
-    },
-    {
-      name: 'lastName',
-      label: 'Last Name',
-      type: 'text',
-      placeholder: 'Your last name',
-      value: user?.lastName || '',
-      required: true
-    },
-    {
-      name: 'email',
-      label: 'Email Address',
-      type: 'email',
-      placeholder: 'Your email address',
-      value: user?.email || '',
-      disabled: true
-    },
-    {
-      name: 'currentPassword',
-      label: 'Current Password',
-      type: 'password',
-      placeholder: 'Enter your current password'
-    },
-    {
-      name: 'newPassword',
-      label: 'New Password',
-      type: 'password',
-      placeholder: 'Enter new password',
-      helpText: 'Leave blank if you don\'t want to change password'
-    },
-    {
-      name: 'confirmPassword',
-      label: 'Confirm New Password',
-      type: 'password',
-      placeholder: 'Confirm new password'
-    },
-    {
-      name: 'notifications',
-      type: 'checkbox',
-      checkboxLabel: 'Receive email notifications about your submissions'
-    }
-  ];
-
-  // Handle submission form submit
+  // Handle submission form submit - this only applies to authenticated users
   const handleSubmissionSubmit = async (formValues) => {
+    // Check if user is authenticated
+    if (!isAuthenticated) {
+      setFormError('Please login to submit content');
+      return;
+    }
+    
     setIsLoading(true);
     setFormError('');
     
@@ -348,69 +265,7 @@ const StudentDashboardPage = () => {
     }
   };
 
-  // Handle settings form submit
-  const handleSettingsSubmit = async (formValues) => {
-    setIsLoading(true);
-    setFormError('');
-    
-    try {
-      // Validate passwords match if new password is provided
-      if (formValues.newPassword && formValues.newPassword !== formValues.confirmPassword) {
-        throw new Error('New passwords do not match');
-      }
-      
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        throw new Error('Authentication required. Please log in again.');
-      }
-      
-      // Prepare data for API
-      const userData = {
-        first_name: formValues.firstName,
-        last_name: formValues.lastName,
-        current_password: formValues.currentPassword,
-        new_password: formValues.newPassword || undefined,
-        notifications: formValues.notifications
-      };
-      
-      // Send to API
-      const response = await axios.patch('http://localhost:5001/api/users/settings', userData, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      // Update user state with new data
-      setUser(prev => ({
-        ...prev,
-        firstName: formValues.firstName,
-        lastName: formValues.lastName
-      }));
-      
-      // Update user data in localStorage
-      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      localStorage.setItem('user', JSON.stringify({
-        ...storedUser,
-        firstName: formValues.firstName,
-        lastName: formValues.lastName
-      }));
-      
-      setSuccessMessage('Your settings have been successfully updated!');
-    } catch (error) {
-      console.error('Settings update error:', error);
-      setFormError(
-        error.response?.data?.error ||
-        error.message ||
-        'An error occurred while updating settings'
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Sidebar navigation items
+  // Sidebar navigation items - modified for guests
   const sidebarItems = [
     {
       id: 'overview',
@@ -420,22 +275,28 @@ const StudentDashboardPage = () => {
     },
     {
       id: 'submissions',
-      label: 'My Submissions',
+      label: 'All Submissions',
       isActive: activeTab === 'submissions',
       onClick: () => handleTabChange('submissions'),
     },
-    {
-      id: 'new-submission',
-      label: 'New Submission',
-      isActive: activeTab === 'new-submission',
-      onClick: () => handleTabChange('new-submission'),
-    },
-    {
-      id: 'settings',
-      label: 'Settings',
-      isActive: activeTab === 'settings',
-      onClick: () => handleTabChange('settings'),
-    }
+    // Only show New Submission tab for authenticated users
+    ...(isAuthenticated ? [
+      {
+        id: 'new-submission',
+        label: 'New Submission',
+        isActive: activeTab === 'new-submission',
+        onClick: () => handleTabChange('new-submission'),
+      }
+    ] : []),
+    // Settings tab only for authenticated users
+    ...(isAuthenticated ? [
+      {
+        id: 'settings',
+        label: 'Settings',
+        isActive: activeTab === 'settings',
+        onClick: () => handleTabChange('settings'),
+      }
+    ] : [])
   ];
 
   // Important dates
@@ -459,16 +320,29 @@ const StudentDashboardPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        Dashboard Overview
+        University Magazine Submissions
       </motion.h1>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Welcome Message */}
-        <ContentCard title={`Welcome, ${user?.firstName || 'Student'}!`}>
+        <ContentCard title={isAuthenticated ? `Welcome, ${user?.firstName || 'Student'}!` : "Welcome to University Magazine"}>
           <p className="text-gray-300 text-center">
-            This is your student dashboard for the University Magazine. From here, you can
-            view and manage your submissions.
+            {isAuthenticated 
+              ? "This is your dashboard for the University Magazine. From here, you can view and manage your submissions."
+              : "Browse through selected submissions from students across all faculties. Login to submit your own work."}
           </p>
+          
+          {/* Login prompt for guests */}
+          {!isAuthenticated && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => navigate('/login')}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors"
+              >
+                Sign in to contribute
+              </button>
+            </div>
+          )}
         </ContentCard>
 
         {/* Important Dates */}
@@ -501,7 +375,7 @@ const StudentDashboardPage = () => {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        My Submissions
+        {isAuthenticated ? "My Submissions" : "Published Submissions"}
       </motion.h1>
       
       <ContentCard centered>
@@ -533,25 +407,27 @@ const StudentDashboardPage = () => {
                       </span>
                     </div>
                   </div>
-                  <div className="flex space-x-2">
-                    <button 
-                      className="p-1 text-blue-400 hover:text-blue-300"
-                      title="View submission"
-                    >
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    </button>
-                    <button 
-                      className="p-1 text-blue-400 hover:text-blue-300"
-                      title="Download file"
-                    >
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                    </button>
-                  </div>
+                  {isAuthenticated && (
+                    <div className="flex space-x-2">
+                      <button 
+                        className="p-1 text-blue-400 hover:text-blue-300"
+                        title="View submission"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </button>
+                      <button 
+                        className="p-1 text-blue-400 hover:text-blue-300"
+                        title="Download file"
+                      >
+                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             ))}
@@ -563,22 +439,24 @@ const StudentDashboardPage = () => {
             animate={{ scale: 1, opacity: 1 }}
             transition={{ duration: 0.3, delay: 0.2 }}
           >
-            <p className="text-gray-400 text-lg">No submissions yet.</p>
-            <div className="mt-6 text-center">
-              <button
-                onClick={() => handleTabChange('new-submission')}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
-              >
-                Create New Submission
-              </button>
-            </div>
+            <p className="text-gray-400 text-lg">No submissions found.</p>
+            {isAuthenticated && (
+              <div className="mt-6 text-center">
+                <button
+                  onClick={() => handleTabChange('new-submission')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+                >
+                  Create New Submission
+                </button>
+              </div>
+            )}
           </motion.div>
         )}
       </ContentCard>
     </>
   );
 
-  // New Submission Tab Content
+  // New Submission Tab Content - Only shown when authenticated
   const renderNewSubmissionContent = () => (
     <>
       <motion.h1 
@@ -638,76 +516,7 @@ const StudentDashboardPage = () => {
                 submitText={isLoading ? "Submitting..." : "Submit"}
                 isSubmitting={isLoading}
                 error={formError}
-              />
-            </div>
-          </motion.div>
-        )}
-      </ContentCard>
-    </>
-  );
-
-  // Settings Tab Content
-  const renderSettingsContent = () => (
-    <>
-      <motion.h1 
-        className="text-3xl font-bold mb-6 text-center"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
-        Settings
-      </motion.h1>
-      
-      <ContentCard>
-        {successMessage ? (
-          <motion.div 
-            className="py-8 text-center"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.3 }}
-          >
-            <div className="flex items-center justify-center mb-4">
-              <div className="bg-green-500 rounded-full p-2">
-                <svg className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-            </div>
-            <h3 className="text-xl font-medium text-white mb-2">Settings Updated!</h3>
-            <p className="text-gray-300 mb-6">{successMessage}</p>
-            <button
-              onClick={() => setSuccessMessage('')}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
-            >
-              Back to Settings
-            </button>
-          </motion.div>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <p className="text-gray-300 mb-6 text-center">
-              Update your personal information and account settings.
-            </p>
-            
-            <div className="max-w-3xl mx-auto">
-              <FormComponent
-                fields={getSettingsFields()}
-                initialValues={{
-                  firstName: user?.firstName || '',
-                  lastName: user?.lastName || '',
-                  email: user?.email || '',
-                  currentPassword: '',
-                  newPassword: '',
-                  confirmPassword: '',
-                  notifications: true
-                }}
-                onSubmit={handleSettingsSubmit}
-                submitText={isLoading ? "Saving..." : "Save Changes"}
-                isSubmitting={isLoading}
-                error={formError}
+                requiresAuth={true} // Explicitly require auth for submissions
               />
             </div>
           </motion.div>
@@ -719,10 +528,7 @@ const StudentDashboardPage = () => {
   // Return the dashboard layout with the appropriate content based on active tab
   return (
     <DashboardLayout
-      user={{
-        ...user,
-        avatar: null // No avatar image, will show initials
-      }}
+      user={user}
       lastLogin={lastLogin}
       sidebarItems={sidebarItems}
       importantDates={importantDates}
@@ -734,12 +540,12 @@ const StudentDashboardPage = () => {
         <div className="w-full max-w-4xl">
           {activeTab === 'overview' && renderOverviewContent()}
           {activeTab === 'submissions' && renderSubmissionsContent()}
-          {activeTab === 'new-submission' && renderNewSubmissionContent()}
-          {activeTab === 'settings' && renderSettingsContent()}
+          {activeTab === 'new-submission' && isAuthenticated && renderNewSubmissionContent()}
+          {/* Settings tab would be rendered here, but it's omitted for guests */}
         </div>
       </div>
     </DashboardLayout>
   );
 };
 
-export default StudentDashboardPage;
+export default SubmissionsPage;

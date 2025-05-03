@@ -71,10 +71,28 @@ const LoginPage = ({ onLoginSuccess }) => {
       console.log('Response received:', response);
       const { token, user } = response.data;
       
+      // Normalize role before storing
+      let normalizedRole = user.role;
+      if (user.role === 2 || user.role === '2') {
+        normalizedRole = 'MNGR';
+      } else if (user.role === 1 || user.role === '1') {
+        normalizedRole = 'ADMIN';
+      } else if (user.role === 3 || user.role === '3') {
+        normalizedRole = 'COORD';
+      } else if (user.role === 4 || user.role === '4') {
+        normalizedRole = 'STUDT';
+      }
+      
+      // Store normalized user data
+      const normalizedUser = {
+        ...user,
+        role: normalizedRole
+      };
+      
       console.log('Storing authentication data...');
       // Store authentication data
       localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('user', JSON.stringify(normalizedUser));
       localStorage.setItem('isLoggedIn', 'true');
       localStorage.setItem('lastLoginTime', new Date().toISOString());
       
@@ -86,7 +104,7 @@ const LoginPage = ({ onLoginSuccess }) => {
       
       // Call the onLoginSuccess callback with the user data
       if (onLoginSuccess) {
-        onLoginSuccess(user);
+        onLoginSuccess(normalizedUser);
       }
       
       console.log('Navigation to dashboard...');
@@ -224,6 +242,7 @@ const LoginPage = ({ onLoginSuccess }) => {
               className="bg-transparent p-0 border-0 shadow-none"
               inputClassName="appearance-none block w-full px-3 py-2 border border-gray-600 rounded-md bg-gray-700 placeholder-gray-500 text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-all duration-300"
               buttonClassName="w-full bg-gray-900 hover:bg-gray-800 text-white font-medium py-2 px-4 rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-70 disabled:cursor-not-allowed"
+              requiresAuth={false}  // IMPORTANT: Set this to false for login forms
             />
 
             <div className="mt-4 flex items-center justify-between">

@@ -23,7 +23,8 @@ const FormComponent = ({
   fieldClassName = "",
   inputClassName = "",
   buttonClassName = "",
-  getInputFocusStyles = null
+  getInputFocusStyles = null,
+  requiresAuth = true // New prop to determine if form needs authentication
 }) => {
   // State to track form values - initialized with any provided initial values
   const [formValues, setFormValues] = useState(initialValues);
@@ -203,21 +204,23 @@ const FormComponent = ({
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    // Check for authentication before proceeding
-    const token = localStorage.getItem('token');
-    if (!token) {
-      // If the token is missing, display an error and redirect
-      setFieldErrors({
-        ...fieldErrors,
-        form: 'Authentication required. Please log in again.'
-      });
-      
-      // Redirect to login after a short delay
-      setTimeout(() => {
-        window.location.href = '/login';
-      }, 2000);
-      
-      return;
+    // Check for authentication before proceeding, but only if the form requires it
+    if (requiresAuth) {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        // If the token is missing and authentication is required, display an error
+        setFieldErrors({
+          ...fieldErrors,
+          form: 'Authentication required. Please log in again.'
+        });
+        
+        // Redirect to login after a short delay
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 2000);
+        
+        return;
+      }
     }
     
     // Validate form
@@ -362,8 +365,8 @@ const FormComponent = ({
     );
   };
 
-  // Check if authentication token is available
-  const isAuthenticated = !!localStorage.getItem('token');
+  // Determine if authentication warning should be shown (only if requiresAuth is true)
+  const isAuthenticated = requiresAuth ? !!localStorage.getItem('token') : true;
 
   // Main component render
   return (
@@ -373,8 +376,8 @@ const FormComponent = ({
         <h2 className="text-xl font-bold text-white mb-6">{title}</h2>
       )}
       
-      {/* Authentication warning */}
-      {!isAuthenticated && (
+      {/* Authentication warning - only shown if form requires authentication */}
+      {requiresAuth && !isAuthenticated && (
         <div className="mb-4 bg-yellow-900/50 border border-yellow-500 text-yellow-300 px-4 py-3 rounded relative" role="alert">
           <span className="block sm:inline">You are not logged in. Please log in to submit this form.</span>
         </div>
@@ -543,10 +546,10 @@ const FormComponent = ({
               </button>
             )}
             
-            {/* Submit button */}
+            {/* Submit button - disabled based on authentication requirement */}
             <button
               type="submit"
-              disabled={isSubmitting || !isAuthenticated}
+              disabled={isSubmitting || (requiresAuth && !isAuthenticated)}
               className={`${buttonClassName || 'flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-70 disabled:cursor-not-allowed'} flex justify-center items-center`}
             >
               {isSubmitting ? (

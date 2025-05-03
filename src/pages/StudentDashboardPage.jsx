@@ -151,6 +151,13 @@ const StudentDashboardPage = () => {
   // Fetch user submissions
   const fetchSubmissions = async (token) => {
     try {
+      if (!token) {
+        token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('No authentication token available');
+        }
+      }
+      
       const response = await axios.get('http://localhost:5001/api/submissions', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -171,9 +178,6 @@ const StudentDashboardPage = () => {
     
     // Use window.location for a hard page refresh/redirect
     window.location.href = '/login';
-    
-    // We don't need to call the logout API - the token is already removed
-    // This ensures we never get stuck on a loading screen
   };
 
   // Handle tab changes
@@ -285,53 +289,104 @@ const StudentDashboardPage = () => {
     }
   ];
 
-  // Handle submission form submit
+  // FIXED: Handle submission form submit
   const handleSubmissionSubmit = async (formValues) => {
-    setIsLoading(true);
-    setFormError('');
-    
     try {
+      // Reset state
+      setIsLoading(true);
+      setFormError('');
+      
+      // Validate the form data
+      if (!formValues.title) {
+        setFormError('Please enter a submission title');
+        setIsLoading(false);
+        return;
+      }
+      
+      if (!formValues.file) {
+        setFormError('Please select a file to upload');
+        setIsLoading(false);
+        return;
+      }
+      
+      // Get the token synchronously
       const token = localStorage.getItem('token');
-      
       if (!token) {
-        throw new Error('Authentication required. Please log in again.');
+        setFormError('Your session has expired. Please log in again.');
+        setIsLoading(false);
+        return;
       }
       
-      // Create form data for file upload
-      const formData = new FormData();
-      Object.keys(formValues).forEach(key => {
-        if (key === 'file') {
-          formData.append(key, formValues[key]);
+      // Create a vanilla XMLHttpRequest (avoids issues with Axios and fetch)
+      const xhr = new XMLHttpRequest();
+      
+      // Set up progress and completion handlers
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = (event.loaded / event.total) * 100;
+          console.log(`Upload progress: ${percentComplete.toFixed(2)}%`);
+        }
+      };
+      
+      // Handle completion
+      xhr.onload = function() {
+        setIsLoading(false);
+        
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Success
+          console.log('File uploaded successfully');
+          setSuccessMessage('Your submission has been successfully received!');
+          setTimeout(() => {
+            fetchSubmissions();
+            handleTabChange('submissions');
+          }, 2000);
         } else {
-          formData.append(key, formValues[key]);
+          // Error
+          console.error('Upload failed', xhr.status, xhr.statusText);
+          try {
+            const response = JSON.parse(xhr.responseText);
+            setFormError(response.error || `Upload failed: ${xhr.statusText}`);
+          } catch (e) {
+            setFormError(`Upload failed: ${xhr.status} ${xhr.statusText}`);
+          }
         }
-      });
+      };
       
-      // Add current academic year if not provided
-      if (!formValues.academicYear) {
-        formData.append('academicYear', '2024-2025');
+      // Handle network errors
+      xhr.onerror = function() {
+        console.error('Network error during upload');
+        setFormError('Network error during upload. Please check your connection and try again.');
+        setIsLoading(false);
+      };
+      
+      // Open the request
+      xhr.open('POST', 'http://localhost:5001/api/submissions', true);
+      
+      // Set authorization header
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      
+      // Create FormData
+      const formData = new FormData();
+      formData.append('title', formValues.title);
+      formData.append('description', formValues.description || '');
+      formData.append('academicYear', formValues.academicYear || '2024-2025');
+      formData.append('termsAccepted', formValues.termsAccepted ? 'true' : 'false');
+      formData.append('file', formValues.file);
+      
+      // Log what we're sending in development (debugging only)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Sending the following data:');
+        for (let [key, value] of formData.entries()) {
+          console.log(`${key}: ${key === 'file' ? value.name : value}`);
+        }
       }
       
-      // Send to API
-      const response = await axios.post('http://localhost:5001/api/submissions', formData, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
-      });
+      // Send the request
+      xhr.send(formData);
       
-      setSuccessMessage('Your submission has been successfully received!');
-      setTimeout(() => {
-        handleTabChange('submissions');
-      }, 3000);
     } catch (error) {
       console.error('Submission error:', error);
-      setFormError(
-        error.response?.data?.error ||
-        error.message ||
-        'An error occurred while submitting your work'
-      );
-    } finally {
+      setFormError(error.message || 'An unexpected error occurred during submission');
       setIsLoading(false);
     }
   };
